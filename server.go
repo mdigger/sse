@@ -8,6 +8,8 @@ import (
 	"github.com/mdigger/log"
 )
 
+const Mimetype = "text/event-stream"
+
 // Broker обеспечивает поддержку Server Side Events.
 type Broker struct {
 	register   chan<- chan<- string       // канал подключения новых клиентов
@@ -99,6 +101,10 @@ func (broker *Broker) Retry(through time.Duration) {
 	}
 }
 
+func (broker *Broker) Close() {
+
+}
+
 // ServeHTTP обрабатывает серверное подключение клиента через HTTP.
 func (broker *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// проверяем, что поддерживается частичная отдача данных
@@ -108,15 +114,14 @@ func (broker *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	const mimetype = "text/event-stream"
 	header := w.Header()
-	if r.Header.Get("Accept") != mimetype {
-		header.Set("Accept", mimetype)
+	if r.Header.Get("Accept") != Mimetype {
+		header.Set("Accept", Mimetype)
 		w.WriteHeader(http.StatusNotAcceptable)
 		return
 	}
 	// устанавливаем в ответе заголовки
-	header.Set("Content-Type", mimetype)
+	header.Set("Content-Type", Mimetype)
 	header.Set("Cache-Control", "no-cache")
 	header.Set("Connection", "keep-alive")
 	header.Set("Access-Control-Allow-Origin", "*")
