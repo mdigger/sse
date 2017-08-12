@@ -15,8 +15,9 @@ type Broker struct {
 	notifier   chan<- eventSourcer        // канал приема событий на отправку
 	clients    map[chan<- string]struct{} //  список подключенных клиентов
 
-	OnConnect func(state bool, count int) // вызывается при подключении/отключении
-	OnData    func(event Event)           // вызывается при новых данных
+	OnConnect       func(state bool, count int) // вызывается при подключении/отключении
+	OnData          func(event Event)           // вызывается при новых данных
+	OnLastIDRequest func(id string) []Event     // вызывается при запросе событий с последнего идентификатора
 }
 
 // New инициализирует и возвращает новый брокер с поддержкой Server Side Events.
@@ -118,6 +119,19 @@ func (broker *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	header.Set("Cache-Control", "no-cache")
 	header.Set("Connection", "keep-alive")
 	header.Set("Access-Control-Allow-Origin", "*")
+
+	// отсылаем последние сообщения, начиная с указанного номера, если
+	// это поддерживается брокером и запрашивается клиентом
+	if lastID := r.Header.Get("Last-Event-ID"); lastID != "" &&
+		broker.OnLastIDRequest != nil {
+		for _, event := range broker.OnLastIDRequest(lastID) {
+			if _, err := fmt.Fprintln(w, event.data()); err != nil {
+				return // в случае ошибки закрываем соединение
+			}
+			flusher.Flush() // принудительно сбрасываем буфер на отправление
+		}
+	}
+
 	// инициализируем канал для приема событий
 	messages := make(chan string)
 	// отправляем его серверу для регистрации нового клиента
