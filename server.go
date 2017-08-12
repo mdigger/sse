@@ -2,7 +2,9 @@ package sse
 
 import (
 	"fmt"
+	"mime"
 	"net/http"
+	"sync/atomic"
 	"time"
 )
 
@@ -10,14 +12,11 @@ const Mimetype = "text/event-stream"
 
 // Broker обеспечивает поддержку Server Side Events.
 type Broker struct {
-	register   chan<- chan<- string       // канал подключения новых клиентов
-	unregister chan<- chan<- string       // канал отключения клиентов
-	notifier   chan<- eventSourcer        // канал приема событий на отправку
-	clients    map[chan<- string]struct{} //  список подключенных клиентов
-
-	OnConnect       func(state bool, count int) // вызывается при подключении/отключении
-	OnData          func(event Event)           // вызывается при новых данных
-	OnLastIDRequest func(id string) []Event     // вызывается при запросе событий с последнего идентификатора
+	register   chan<- chan<- string // канал подключения новых клиентов
+	unregister chan<- chan<- string // канал отключения клиентов
+	notifier   chan<- eventSourcer  // канал приема событий на отправку
+	counter    uint32               // счетчик подключенных
+	// OnLastIDRequest func(id string) []Event     // вызывается при запросе событий с последнего идентификатора
 }
 
 // New инициализирует и возвращает новый брокер с поддержкой Server Side Events.
@@ -32,29 +31,29 @@ func New() *Broker {
 		notifier:   notifier,
 		register:   register,
 		unregister: unregister,
-		clients:    clients,
 	}
 	go func() {
 		for {
 			select {
 			case client := <-register: // подключился новый клиент
-				clients[client] = struct{}{}
-				if broker.OnConnect != nil {
-					broker.OnConnect(true, len(clients))
+				if _, ok := clients[client]; !ok {
+					clients[client] = struct{}{}
+					atomic.AddUint32(&broker.counter, 1)
+					// log.Warning("~ connected")
 				}
 			case client := <-unregister: // отключился клиент
-				delete(clients, client)
-				if broker.OnConnect != nil {
-					broker.OnConnect(false, len(clients))
+				if _, ok := clients[client]; ok {
+					delete(clients, client)
+					close(client)
+					atomic.AddUint32(&broker.counter, ^uint32(0))
+					// log.Warning("~ disconnected")
 				}
 			case event := <-notifier: // отправить событие всем клиентам
 				data := event.data() // преобразуем к формату EventSource
 				for client := range clients {
 					client <- data
 				}
-				if event, ok := event.(Event); ok && broker.OnData != nil {
-					broker.OnData(event)
-				}
+				// log.Warning("~ data")
 			}
 		}
 	}()
@@ -63,7 +62,7 @@ func New() *Broker {
 
 // Connected возвращает количество подключенных клиентов.
 func (broker *Broker) Connected() int {
-	return len(broker.clients)
+	return int(atomic.LoadUint32(&broker.counter))
 }
 
 // Data формирует и отправляет данные всем клиентам. В качестве параметров
@@ -108,12 +107,12 @@ func (broker *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	header := w.Header()
-	// mediatype, _, _ := mime.ParseMediaType(r.Header.Get("Accept"))
-	// if mediatype != Mimetype {
-	// 	header.Set("Accept", Mimetype)
-	// 	w.WriteHeader(http.StatusNotAcceptable)
-	// 	return
-	// }
+	mediatype, _, _ := mime.ParseMediaType(r.Header.Get("Accept"))
+	if mediatype != Mimetype {
+		header.Set("Accept", Mimetype)
+		w.WriteHeader(http.StatusNotAcceptable)
+		return
+	}
 	// устанавливаем в ответе заголовки
 	header.Set("Content-Type", Mimetype)
 	header.Set("Cache-Control", "no-cache")
@@ -122,15 +121,15 @@ func (broker *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// отсылаем последние сообщения, начиная с указанного номера, если
 	// это поддерживается брокером и запрашивается клиентом
-	if lastID := r.Header.Get("Last-Event-ID"); lastID != "" &&
-		broker.OnLastIDRequest != nil {
-		for _, event := range broker.OnLastIDRequest(lastID) {
-			if _, err := fmt.Fprintln(w, event.data()); err != nil {
-				return // в случае ошибки закрываем соединение
-			}
-			flusher.Flush() // принудительно сбрасываем буфер на отправление
-		}
-	}
+	// if lastID := r.Header.Get("Last-Event-ID"); lastID != "" &&
+	// 	broker.OnLastIDRequest != nil {
+	// 	for _, event := range broker.OnLastIDRequest(lastID) {
+	// 		if _, err := fmt.Fprintln(w, event.data()); err != nil {
+	// 			return // в случае ошибки закрываем соединение
+	// 		}
+	// 		flusher.Flush() // принудительно сбрасываем буфер на отправление
+	// 	}
+	// }
 
 	// инициализируем канал для приема событий
 	messages := make(chan string)
@@ -139,6 +138,7 @@ func (broker *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// при обрыве соединения тоже отправляем уведомление о закрытии
 	go func() {
 		<-r.Context().Done()
+		// log.Warning("context done")
 		broker.unregister <- messages
 	}()
 	// отправляем все входящие события и отправляем их клиенту
@@ -148,6 +148,4 @@ func (broker *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		flusher.Flush() // принудительно сбрасываем буфер на отправление
 	}
-	// по закрытии соединения отправляем этот канал для закрытия
-	broker.unregister <- messages
 }
