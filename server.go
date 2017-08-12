@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"time"
-
-	"github.com/mdigger/log"
 )
 
 const Mimetype = "text/event-stream"
@@ -16,6 +14,9 @@ type Broker struct {
 	unregister chan<- chan<- string       // канал отключения клиентов
 	notifier   chan<- eventSourcer        // канал приема событий на отправку
 	clients    map[chan<- string]struct{} //  список подключенных клиентов
+
+	OnConnect func(state bool, count int) // вызывается при подключении/отключении
+	OnData    func(event Event)           // вызывается при новых данных
 }
 
 // New инициализирует и возвращает новый брокер с поддержкой Server Side Events.
@@ -26,46 +27,37 @@ func New() *Broker {
 		unregister = make(chan chan<- string)         // канал для приема закрытия канала
 		clients    = make(map[chan<- string]struct{}) // список текущих клиентов
 	)
-	go func() {
-		for {
-			select {
-			case client := <-register: // подключился новый клиент
-				clients[client] = struct{}{}
-				log.WithField("connected", len(clients)).Info("new client connection")
-			case client := <-unregister: // отключился клиент
-				delete(clients, client)
-				log.WithField("connected", len(clients)).Info("client disconnected")
-			case event := <-notifier: // отправить событие всем клиентам
-				data := event.data() // преобразуем к формату EventSource
-				for client := range clients {
-					client <- data
-				}
-				if log.GetLevel() < 0 {
-					ctxlog := log.WithField("length", len(data))
-					switch event := event.(type) {
-					case Event:
-						ctxlog = ctxlog.WithFields(log.Fields{
-							"type": "event",
-							"name": event.Name,
-							"id":   event.ID})
-					case Comment:
-						ctxlog = ctxlog.WithField("type", "comment")
-					case Retry:
-						ctxlog = ctxlog.WithFields(log.Fields{
-							"type":     "retry",
-							"duration": time.Duration(event)})
-					}
-					ctxlog.Debug("sending event")
-				}
-			}
-		}
-	}()
-	return &Broker{
+	var broker = &Broker{
 		notifier:   notifier,
 		register:   register,
 		unregister: unregister,
 		clients:    clients,
 	}
+	go func() {
+		for {
+			select {
+			case client := <-register: // подключился новый клиент
+				clients[client] = struct{}{}
+				if broker.OnConnect != nil {
+					broker.OnConnect(true, len(clients))
+				}
+			case client := <-unregister: // отключился клиент
+				delete(clients, client)
+				if broker.OnConnect != nil {
+					broker.OnConnect(false, len(clients))
+				}
+			case event := <-notifier: // отправить событие всем клиентам
+				data := event.data() // преобразуем к формату EventSource
+				for client := range clients {
+					client <- data
+				}
+				if event, ok := event.(Event); ok && broker.OnData != nil {
+					broker.OnData(event)
+				}
+			}
+		}
+	}()
+	return broker
 }
 
 // Connected возвращает количество подключенных клиентов.
@@ -115,11 +107,12 @@ func (broker *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	header := w.Header()
-	if r.Header.Get("Accept") != Mimetype {
-		header.Set("Accept", Mimetype)
-		w.WriteHeader(http.StatusNotAcceptable)
-		return
-	}
+	// mediatype, _, _ := mime.ParseMediaType(r.Header.Get("Accept"))
+	// if mediatype != Mimetype {
+	// 	header.Set("Accept", Mimetype)
+	// 	w.WriteHeader(http.StatusNotAcceptable)
+	// 	return
+	// }
 	// устанавливаем в ответе заголовки
 	header.Set("Content-Type", Mimetype)
 	header.Set("Cache-Control", "no-cache")
