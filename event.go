@@ -28,7 +28,7 @@ func (e Event) data() string {
 	defer bufPool.Put(buf)
 
 	if e.Name != "" {
-		fmt.Fprintln(buf, "event:", strings.Replace(e.Name, "\n", " ", -1))
+		fmt.Fprintln(buf, "event:", strings.Replace(e.Name, "\n", "\\n", -1))
 	}
 	if e.Data != "" {
 		for _, line := range strings.Split(e.Data, "\n") {
@@ -36,7 +36,7 @@ func (e Event) data() string {
 		}
 	}
 	if e.ID != "" {
-		fmt.Fprintln(buf, "id:", strings.Replace(e.ID, "\n", " ", -1))
+		fmt.Fprintln(buf, "id:", strings.Replace(e.ID, "\n", "\\n", -1))
 	}
 	return buf.String()
 }
