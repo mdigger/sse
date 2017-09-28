@@ -115,8 +115,8 @@ func (broker *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// устанавливаем в ответе заголовки
 	header.Set("Content-Type", Mimetype)
-	header.Set("Cache-Control", "no-cache")
-	header.Set("Connection", "keep-alive")
+	// header.Set("Cache-Control", "no-cache")
+	// header.Set("Connection", "keep-alive")
 	header.Set("Access-Control-Allow-Origin", "*")
 
 	// отсылаем последние сообщения, начиная с указанного номера, если
