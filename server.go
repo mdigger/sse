@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"mime"
 	"net/http"
-	"sync/atomic"
+	"sync"
 	"time"
 )
 
+// Mimetype задает тип данных для серверных событий.
 const Mimetype = "text/event-stream"
 
 // Broker обеспечивает поддержку Server Side Events.
@@ -15,17 +16,16 @@ type Broker struct {
 	register   chan<- chan<- string // канал подключения новых клиентов
 	unregister chan<- chan<- string // канал отключения клиентов
 	notifier   chan<- eventSourcer  // канал приема событий на отправку
-	counter    uint32               // счетчик подключенных
+	clients    sync.Map             // подключенные клиенты
 	// OnLastIDRequest func(id string) []Event     // вызывается при запросе событий с последнего идентификатора
 }
 
 // New инициализирует и возвращает новый брокер с поддержкой Server Side Events.
 func New() *Broker {
 	var (
-		notifier   = make(chan eventSourcer, 1)       // канал отправки событий
-		register   = make(chan chan<- string)         // канал приема каналов новых клиентов
-		unregister = make(chan chan<- string)         // канал для приема закрытия канала
-		clients    = make(map[chan<- string]struct{}) // список текущих клиентов
+		notifier   = make(chan eventSourcer, 1) // канал отправки событий
+		register   = make(chan chan<- string)   // канал приема каналов новых клиентов
+		unregister = make(chan chan<- string)   // канал для приема закрытия канала
 	)
 	var broker = &Broker{
 		notifier:   notifier,
@@ -36,24 +36,18 @@ func New() *Broker {
 		for {
 			select {
 			case client := <-register: // подключился новый клиент
-				if _, ok := clients[client]; !ok {
-					clients[client] = struct{}{}
-					atomic.AddUint32(&broker.counter, 1)
-					// log.Warning("~ connected")
-				}
+				broker.clients.Store(client, nil)
 			case client := <-unregister: // отключился клиент
-				if _, ok := clients[client]; ok {
-					delete(clients, client)
+				if _, ok := broker.clients.Load(client); ok {
+					broker.clients.Delete(client)
 					close(client)
-					atomic.AddUint32(&broker.counter, ^uint32(0))
-					// log.Warning("~ disconnected")
 				}
 			case event := <-notifier: // отправить событие всем клиентам
-				data := event.data() // преобразуем к формату EventSource
-				for client := range clients {
-					client <- data
-				}
-				// log.Warning("~ data")
+				var data = event.data() // преобразуем к формату EventSource
+				broker.clients.Range(func(client, _ interface{}) bool {
+					client.(chan<- string) <- data
+					return true
+				})
 			}
 		}
 	}()
@@ -62,7 +56,12 @@ func New() *Broker {
 
 // Connected возвращает количество подключенных клиентов.
 func (broker *Broker) Connected() int {
-	return int(atomic.LoadUint32(&broker.counter))
+	var count int
+	broker.clients.Range(func(client, _ interface{}) bool {
+		count++
+		return true
+	})
+	return count
 }
 
 // Data формирует и отправляет данные всем клиентам. В качестве параметров
@@ -93,8 +92,12 @@ func (broker *Broker) Retry(through time.Duration) {
 	}
 }
 
+// Close закрывает все подключения к брокеру.
 func (broker *Broker) Close() {
-
+	broker.clients.Range(func(client, _ interface{}) bool {
+		broker.unregister <- client.(chan<- string)
+		return true
+	})
 }
 
 // ServeHTTP обрабатывает серверное подключение клиента через HTTP.
@@ -115,7 +118,7 @@ func (broker *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// устанавливаем в ответе заголовки
 	header.Set("Content-Type", Mimetype)
-	// header.Set("Cache-Control", "no-cache")
+	header.Set("Cache-Control", "no-cache")
 	// header.Set("Connection", "keep-alive")
 	header.Set("Access-Control-Allow-Origin", "*")
 

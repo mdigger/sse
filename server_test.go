@@ -14,8 +14,7 @@ import (
 )
 
 func TestBroker(t *testing.T) {
-	log.SetLevel(log.DebugLevel)
-	log.SetFlags(log.Lindent)
+	log.SetLevel(log.DEBUG)
 	broker := New()
 	go func() {
 		for range time.Tick(5 * time.Second) {
@@ -34,7 +33,7 @@ func TestBroker(t *testing.T) {
 			var str = &struct {
 				ID   uint64   `json:"id"`
 				Time jwt.Time `json:"time,omitempty"`
-			}{ID: id, Time: jwt.Time{time.Now()}}
+			}{ID: id, Time: jwt.Time{Time: time.Now()}}
 			data, err := json.MarshalIndent(str, "", "  ")
 			if err != nil {
 				t.Fatal(err)
@@ -56,14 +55,14 @@ func TestBroker(t *testing.T) {
 
 	res, err := client.Do(req)
 	if err != nil {
-		log.WithError(err).Error("http client error")
+		log.Error("http client error", err)
 	}
 	fmt.Println(res.Status)
 	r := bufio.NewReader(res.Body)
 	for {
 		s, err := r.ReadString('\n')
 		if err != nil {
-			log.WithError(err).Error("event source error")
+			log.Error("event source error", err)
 			break
 		}
 		fmt.Print(s)
