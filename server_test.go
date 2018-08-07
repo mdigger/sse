@@ -8,13 +8,9 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
-
-	"github.com/mdigger/jwt"
-	"github.com/mdigger/log"
 )
 
 func TestBroker(t *testing.T) {
-	log.SetLevel(log.DEBUG)
 	broker := New()
 	go func() {
 		for range time.Tick(5 * time.Second) {
@@ -31,9 +27,9 @@ func TestBroker(t *testing.T) {
 		for range time.Tick(7 * time.Second) {
 			id++
 			var str = &struct {
-				ID   uint64   `json:"id"`
-				Time jwt.Time `json:"time,omitempty"`
-			}{ID: id, Time: jwt.Time{Time: time.Now()}}
+				ID   uint64    `json:"id"`
+				Time time.Time `json:"time,omitempty"`
+			}{ID: id, Time: time.Now()}
 			data, err := json.MarshalIndent(str, "", "  ")
 			if err != nil {
 				t.Fatal(err)
@@ -55,14 +51,14 @@ func TestBroker(t *testing.T) {
 
 	res, err := client.Do(req)
 	if err != nil {
-		log.Error("http client error", err)
+		t.Error("http client error", err)
 	}
 	fmt.Println(res.Status)
 	r := bufio.NewReader(res.Body)
 	for {
 		s, err := r.ReadString('\n')
 		if err != nil {
-			log.Error("event source error", err)
+			t.Error("event source error", err)
 			break
 		}
 		fmt.Print(s)
