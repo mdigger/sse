@@ -38,11 +38,14 @@ func (s *Server) Event(id, name string, v interface{}) error {
 	var data string
 	switch v := v.(type) {
 	case nil:
-		return nil
 	case string:
 		data = v
 	case []byte:
 		data = string(v)
+	case json.RawMessage:
+		data = string(v)
+	case error:
+		data = v.Error()
 	default:
 		d, err := json.Marshal(v)
 		if err != nil {
