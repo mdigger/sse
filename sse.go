@@ -22,8 +22,8 @@ type Server struct {
 }
 
 // Connected return number of connected clients.
-func (s *Server) Connected() uint32 {
-	return atomic.LoadUint32(&s.connected)
+func (s *Server) Connected() int {
+	return int(atomic.LoadUint32(&s.connected))
 }
 
 var pool = sync.Pool{New: func() interface{} { return new(strings.Builder) }}
