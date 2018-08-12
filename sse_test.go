@@ -10,11 +10,11 @@ import (
 	"time"
 )
 
-func TestBroker(t *testing.T) {
-	broker := New()
+func TestSSE(t *testing.T) {
+	broker := new(Server)
 	go func() {
 		for range time.Tick(5 * time.Second) {
-			broker.Data("timer", time.Now().Format("15:04:05"), "")
+			broker.Event("timer", time.Now().Format("15:04:05"), "")
 		}
 	}()
 	go func() {
@@ -34,7 +34,7 @@ func TestBroker(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			broker.Data("payload\ndata", string(data), fmt.Sprintf("id%03d", id))
+			broker.Event("payload\ndata", string(data), fmt.Sprintf("id%03d", id))
 		}
 	}()
 
