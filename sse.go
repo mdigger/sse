@@ -6,7 +6,6 @@ package sse
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"mime"
 	"net/http"
 	"strings"
@@ -140,7 +139,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	)
 	s.clients.Store(messages, nil)
 	atomic.AddUint32(&s.connected, 1)
-	log.Println("connected:", s.connected)
 loop:
 	for {
 		select {
@@ -159,7 +157,6 @@ loop:
 	}
 	s.clients.Delete(messages)
 	atomic.AddUint32(&s.connected, ^uint32(0))
-	log.Println("disconnected:", s.connected)
 	if !closed {
 		close(messages)
 	}
