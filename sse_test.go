@@ -2,7 +2,6 @@ package sse
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,7 +13,7 @@ func TestSSE(t *testing.T) {
 	broker := new(Server)
 	go func() {
 		for range time.Tick(5 * time.Second) {
-			broker.Event("timer", time.Now().Format("15:04:05"), "")
+			broker.Event("", "timer", time.Now().Format("15:04:05"))
 		}
 	}()
 	go func() {
@@ -23,18 +22,16 @@ func TestSSE(t *testing.T) {
 		}
 	}()
 	go func() {
-		var id uint64
+		var id int
 		for range time.Tick(7 * time.Second) {
 			id++
-			var str = &struct {
-				ID   uint64    `json:"id"`
-				Time time.Time `json:"time,omitempty"`
-			}{ID: id, Time: time.Now()}
-			data, err := json.MarshalIndent(str, "", "  ")
-			if err != nil {
-				t.Fatal(err)
-			}
-			broker.Event("payload\ndata", string(data), fmt.Sprintf("id%03d", id))
+			broker.Event(fmt.Sprintf("%04d", id), "event", &struct {
+				ID   int       `json:"id"`
+				Time time.Time `json:"time"`
+			}{
+				ID:   id,
+				Time: time.Now().Truncate(time.Second),
+			})
 		}
 	}()
 

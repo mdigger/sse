@@ -1,3 +1,6 @@
+// Package sse provides HTML5 Server-Sent Events for Go.
+//
+// See http://www.w3.org/TR/eventsource/ for the technical specification.
 package sse
 
 import (
@@ -12,27 +15,30 @@ import (
 	"time"
 )
 
-// Server обеспечивает поддержку Server Side Events.
+// Server provides HTML5 Server-Sent Events
 type Server struct {
 	clients   sync.Map // подключенные клиенты
 	connected uint32   // счетчик подключений
 }
 
-// Connected возвращает количество подключенных клиентов.
+// Connected return number of connected clients.
 func (s *Server) Connected() uint32 {
-	return s.connected
+	return atomic.LoadUint32(&s.connected)
 }
 
 var pool = sync.Pool{New: func() interface{} { return new(strings.Builder) }}
 
-// Event отправляет данные о событии.
-func (s *Server) Event(name string, v interface{}, id string) error {
-	if s.connected == 0 {
+// Event sends an event with the given data encoded as JSON to all connected
+// clients.
+func (s *Server) Event(id, name string, v interface{}) error {
+	if atomic.LoadUint32(&s.connected) == 0 {
 		return nil // если нет клиентов, то и не готовим данные
 	}
 	// преобразуем данные к формату JSON, если это необходимо
 	var data string
 	switch v := v.(type) {
+	case nil:
+		return nil
 	case string:
 		data = v
 	case []byte:
@@ -63,9 +69,9 @@ func (s *Server) Event(name string, v interface{}, id string) error {
 	return nil
 }
 
-// Comment отправляет комментарий.
+// Comment sends an comment with the given text to all connected clients.
 func (s *Server) Comment(text string) {
-	if s.connected == 0 {
+	if atomic.LoadUint32(&s.connected) == 0 {
 		return // если нет клиентов, то и не готовим данные
 	}
 	var buf = pool.Get().(*strings.Builder)
@@ -77,12 +83,12 @@ func (s *Server) Comment(text string) {
 	pool.Put(buf)
 }
 
-// Retry отсылает время восстановления задержки переподключения.
+// Retry sends all clients an indication of the delay in restoring the connection.
 func (s *Server) Retry(d time.Duration) {
-	if s.connected == 0 {
+	if atomic.LoadUint32(&s.connected) == 0 {
 		return // если нет клиентов, то и не готовим данные
 	}
-	s.send(fmt.Sprintln("retry:", int64(d)))
+	s.send(fmt.Sprintln("retry:", int64(d/1000/1000)))
 }
 
 // send отправляет данные всем зарегистрированным клиентам.
@@ -93,7 +99,7 @@ func (s *Server) send(data string) {
 	})
 }
 
-// Close закрывает все соединения.
+// Close closes the server and disconnect all clients.
 func (s *Server) Close() {
 	s.clients.Range(func(client, _ interface{}) bool {
 		close(client.(chan string))
@@ -104,7 +110,7 @@ func (s *Server) Close() {
 // mimetype задает тип данных для серверных событий.
 const mimetype = "text/event-stream"
 
-// ServeHTTP обрабатывает серверное подключение клиента через HTTP.
+// ServeHTTP implements http.Handler interface.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// проверяем, что поддерживается частичная отдача данных
 	flusher, ok := w.(http.Flusher)
@@ -122,6 +128,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	header.Set("Content-Type", mimetype)
+	header.Set("Cache-Control", "no-cache")
+	// header.Set("Access-Control-Allow-Origin", "*")
 	var (
 		messages = make(chan string)  // канал для приема событий
 		done     = r.Context().Done() // канал закрытия соединения
