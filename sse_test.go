@@ -3,8 +3,11 @@ package sse
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/signal"
 	"testing"
 	"time"
 )
@@ -51,15 +54,26 @@ func TestSSE(t *testing.T) {
 		t.Error("http client error", err)
 	}
 	fmt.Println(res.Status)
-	r := bufio.NewReader(res.Body)
-	for {
-		s, err := r.ReadString('\n')
-		if err != nil {
-			t.Error("event source error", err)
-			break
+
+	go func() {
+		r := bufio.NewReader(res.Body)
+		for {
+			s, err := r.ReadString('\n')
+			if err != nil {
+				if err != io.EOF {
+					t.Error("event source error", err)
+				}
+				break
+			}
+			fmt.Print(s)
 		}
-		fmt.Print(s)
-	}
-	res.Body.Close()
+		res.Body.Close()
+	}()
 	// time.Sleep(time.Second * 10)
+	fmt.Println("waiting...")
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, os.Interrupt, os.Kill)
+	<-signalChan
+	fmt.Println("the end")
+	broker.Close()
 }

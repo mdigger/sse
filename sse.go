@@ -10,19 +10,20 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
 // Server provides HTML5 Server-Sent Events
 type Server struct {
-	clients   sync.Map // подключенные клиенты
-	connected uint32   // счетчик подключений
+	clients map[chan string]struct{} // подключенные клиенты
+	mu      sync.RWMutex
 }
 
 // Connected return number of connected clients.
 func (s *Server) Connected() int {
-	return int(atomic.LoadUint32(&s.connected))
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.clients)
 }
 
 var pool = sync.Pool{New: func() interface{} { return new(strings.Builder) }}
@@ -30,9 +31,6 @@ var pool = sync.Pool{New: func() interface{} { return new(strings.Builder) }}
 // Event sends an event with the given data encoded as JSON to all connected
 // clients.
 func (s *Server) Event(id, name string, v interface{}) error {
-	if atomic.LoadUint32(&s.connected) == 0 {
-		return nil // если нет клиентов, то и не готовим данные
-	}
 	// преобразуем данные к формату JSON, если это необходимо
 	var data string
 	switch v := v.(type) {
@@ -73,9 +71,6 @@ func (s *Server) Event(id, name string, v interface{}) error {
 
 // Comment sends an comment with the given text to all connected clients.
 func (s *Server) Comment(text string) {
-	if atomic.LoadUint32(&s.connected) == 0 {
-		return // если нет клиентов, то и не готовим данные
-	}
 	var buf = pool.Get().(*strings.Builder)
 	buf.Reset()
 	for _, line := range strings.Split(text, "\n") {
@@ -87,26 +82,25 @@ func (s *Server) Comment(text string) {
 
 // Retry sends all clients an indication of the delay in restoring the connection.
 func (s *Server) Retry(d time.Duration) {
-	if atomic.LoadUint32(&s.connected) == 0 {
-		return // если нет клиентов, то и не готовим данные
-	}
 	s.send(fmt.Sprintln("retry:", int64(d/1000/1000)))
 }
 
 // send отправляет данные всем зарегистрированным клиентам.
 func (s *Server) send(data string) {
-	s.clients.Range(func(client, _ interface{}) bool {
-		client.(chan string) <- data
-		return true
-	})
+	s.mu.RLock()
+	for client := range s.clients {
+		client <- data
+	}
+	s.mu.RUnlock()
 }
 
 // Close closes the server and disconnect all clients.
 func (s *Server) Close() {
-	s.clients.Range(func(client, _ interface{}) bool {
-		close(client.(chan string))
-		return true
-	})
+	s.mu.Lock()
+	for client := range s.clients {
+		close(client)
+	}
+	s.mu.Unlock()
 }
 
 // mimetype задает тип данных для серверных событий.
@@ -137,8 +131,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		done     = r.Context().Done() // канал закрытия соединения
 		closed   bool                 // флаг, что канал уже закрыт
 	)
-	s.clients.Store(messages, nil)
-	atomic.AddUint32(&s.connected, 1)
+	s.mu.Lock()
+	if s.clients == nil {
+		s.clients = make(map[chan string]struct{})
+	}
+	s.clients[messages] = struct{}{}
+	s.mu.Unlock()
 loop:
 	for {
 		select {
@@ -155,8 +153,9 @@ loop:
 			break loop
 		}
 	}
-	s.clients.Delete(messages)
-	atomic.AddUint32(&s.connected, ^uint32(0))
+	s.mu.Lock()
+	delete(s.clients, messages)
+	s.mu.Unlock()
 	if !closed {
 		close(messages)
 	}
