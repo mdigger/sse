@@ -3,38 +3,28 @@
 See http://www.w3.org/TR/eventsource/ for the technical specification.
 
 ```golang
-package sse_test
+import "github.com/mdigger/sse"
 
-import (
-    "fmt"
-    "log"
-    "net/http"
-    "time"
 
-    "github.com/mdigger/sse"
-)
+var sse = new(sse.Server)
 
 type Event struct {
     ID   int       `json:"id"`
     Time time.Time `json:"time"`
 }
 
-func main {
-    var sse = new(sse.Server)
+go func() {
+    var id int
+    for range time.Tick(5 * time.Second) {
+        id++
+        sse.Event(fmt.Sprintf("%04d", id), "event", 
+        &Event{
+            ID:   id,
+            Time: time.Now().Truncate(time.Second),
+        })
+    }
+}()
 
-    go func() {
-        var id int
-        for range time.Tick(5 * time.Second) {
-            id++
-            sse.Event(fmt.Sprintf("%04d", id), "event", 
-            &Event{
-                ID:   id,
-                Time: time.Now().Truncate(time.Second),
-            })
-        }
-    }()
-
-    http.Handle("/events", sse)
-    log.Fatal(http.ListenAndServe(":8000", nil))
-}
+http.Handle("/events", sse)
+log.Fatal(http.ListenAndServe(":8000", nil))
 ```

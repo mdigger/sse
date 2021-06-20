@@ -16,7 +16,7 @@ func TestSSE(t *testing.T) {
 	broker := new(Server)
 	go func() {
 		for range time.Tick(5 * time.Second) {
-			broker.Event("", "timer", time.Now().Format("15:04:05"))
+			_ = broker.Event("", "timer", time.Now().Format("15:04:05"))
 		}
 	}()
 	go func() {
@@ -28,7 +28,7 @@ func TestSSE(t *testing.T) {
 		var id int
 		for range time.Tick(7 * time.Second) {
 			id++
-			broker.Event(fmt.Sprintf("%04d", id), "event", &struct {
+			_ = broker.Event(fmt.Sprintf("%04d", id), "event", &struct {
 				ID   int       `json:"id"`
 				Time time.Time `json:"time"`
 			}{
@@ -72,7 +72,7 @@ func TestSSE(t *testing.T) {
 	// time.Sleep(time.Second * 10)
 	fmt.Println("waiting...")
 	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, os.Interrupt, os.Kill)
+	signal.Notify(signalChan, os.Interrupt)
 	<-signalChan
 	fmt.Println("the end")
 	broker.Close()

@@ -20,7 +20,7 @@ func Example() {
 		var id int
 		for range time.Tick(5 * time.Second) {
 			id++
-			sse.Event(fmt.Sprintf("%04d", id), "event", &Event{
+			_ = sse.Event(fmt.Sprintf("%04d", id), "event", &Event{
 				ID:   id,
 				Time: time.Now().Truncate(time.Second),
 			})
