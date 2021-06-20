@@ -14,19 +14,22 @@ import (
 
 func TestSSE(t *testing.T) {
 	broker := new(Server)
+
 	go func() {
-		for range time.Tick(5 * time.Second) {
+		for range time.Tick(1 * time.Second) {
 			_ = broker.Event("", "timer", time.Now().Format("15:04:05"))
 		}
 	}()
+
 	go func() {
-		for range time.Tick(25 * time.Second) {
+		for range time.Tick(7 * time.Second) {
 			broker.Comment("comment " + time.Now().Format("15:04:05"))
 		}
 	}()
+
 	go func() {
 		var id int
-		for range time.Tick(7 * time.Second) {
+		for range time.Tick(3 * time.Second) {
 			id++
 			_ = broker.Event(fmt.Sprintf("%04d", id), "event", &struct {
 				ID   int       `json:"id"`
@@ -39,7 +42,7 @@ func TestSSE(t *testing.T) {
 	}()
 
 	ts := httptest.NewServer(broker)
-	defer ts.Close()
+	// defer ts.Close()
 
 	fmt.Println("url:", ts.URL)
 
@@ -69,11 +72,18 @@ func TestSSE(t *testing.T) {
 		}
 		res.Body.Close()
 	}()
-	// time.Sleep(time.Second * 10)
+
 	fmt.Println("waiting...")
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, os.Interrupt)
-	<-signalChan
-	fmt.Println("the end")
+
+	select {
+	case <-signalChan:
+	case <-time.After(time.Second * 25):
+	}
+
 	broker.Close()
+	ts.Close()
+
+	fmt.Println("the end")
 }
